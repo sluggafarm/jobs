@@ -5,6 +5,7 @@ $wallet = "[Your Wallet Here]"
 $local_cache = "C:\temp\_slugga\"
 $baseurl = "https://pastelworld.io/slugga-api/api/v1"
 
+$sleepLaps = 0
 Function Run-SluggaRefreshState {
     param([string]$id)
     $url = "$baseurl/slug/$id/$wallet"
@@ -18,7 +19,6 @@ Function Run-SluggaRefreshState {
     }
     return $need_Retry
 }
-
 Function Run-SluggaAction {
     param([string]$action, [string]$id)
     $url = "$baseurl/slug/$action/$id/$wallet"
@@ -27,13 +27,15 @@ Function Run-SluggaAction {
         $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -OutVariable $resp
         $need_Retry = $false;
     } catch { 
-        Write-Host "Retry $id ... "
+        
     }
     return $need_Retry
 }
 
 do {
     $refresh_tokens = @()
+    $failure_tolerance = 5
+    [bool]$sleep_action_recommended = $false
     $pst_now = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId( [DateTime]::Now , 'Pacific Standard Time' )
 
     Write-Host 
@@ -54,6 +56,7 @@ do {
         
         $feed_count = 0
         $pet_count = 0
+        $sleep_count = 0
 
         foreach($lock in $slugdata.message.slug.locks) {
             if ($lock.action -eq "pet") {
@@ -96,6 +99,7 @@ do {
             } else {
                 if ($feed_count -eq 3 -and $pet_count -eq 5 -and $sleep_wait_time -lt 0 -and $active_lock_wait_time -lt 0) {
                     $next_action = "Sleep"
+                    $sleep_action_recommended = $true
                 }
             }
         }
@@ -103,20 +107,30 @@ do {
         switch($next_action) {
             "Pet" {
                 [bool]$need_retry = Run-SluggaAction -action "pet" -id $tokenId
+                if ($need_retry) {
+                    $failure_tolerance--
+                }
                 $refresh_tokens += $tokenId
                 break;
             }
             "Feed" {
                 [bool]$need_retry = Run-SluggaAction -action "feed" -id $tokenId
+                if ($need_retry) {
+                    $failure_tolerance--
+                }
                 $refresh_tokens += $tokenId
                 break;
             }
             "Sleep" {
                 [bool]$need_retry = Run-SluggaAction -action "sleep" -id $tokenId
+                if ($need_retry) {
+                    $failure_tolerance--
+                }
                 $refresh_tokens += $tokenId           
                 break;
             }       
-        }   
+        }
+        if ($failure_tolerance -le 0) { return   }
     }
     Write-Host
     # Refresh tokens that were updated.
@@ -124,6 +138,12 @@ do {
         Run-SluggaRefreshState -id $token 
     }
     # sleep for 5 minutes, or 300 seconds.
+    if ($sleep_action_recommended -eq $true) {
+        $sleepLaps = $sleepLaps + 1
+    }
+    if ($sleepLaps -gt 2) {
+        return # blow it up if we have called sleep twice. !
+    }
     Start-Sleep -Seconds 300
 }
 while (1 -eq 1)
