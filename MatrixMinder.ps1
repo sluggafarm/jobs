@@ -1,10 +1,11 @@
 # Depends on data downloaded with the RefreshLocalCache.ps1 recipe.
 # This process will consider the local cache of data and determine the correct action for each slugga.
-# Slugga MatrixMinder v1.4
+# Slugga MatrixMinder v1.5
 $wallet = "[Your Wallet Here]"
 $local_cache = "C:\temp\_slugga\"
 $baseurl = "https://pastelworld.io/slugga-api/api/v1"
 
+$verbose_logging = $false
 $sleepLaps = 0
 
 Function Run-SluggaRefreshState {
@@ -16,32 +17,30 @@ Function Run-SluggaRefreshState {
         $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $outPath -ErrorAction Continue
         $need_Retry = $false;
     } catch { 
-        Write-Host "Refresh Failed!" -f Red
+        #Write-Host "Refresh Failed!" -f Red
     }
     return $need_Retry
 }
 Function Run-SluggaAction {
     param([string]$action, [string]$id)
     $url = "$baseurl/slug/$action/$id/$wallet"
+    #WRite-Host $url
     $need_Retry = $true;    
     try {
         $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -OutVariable $resp
         $need_Retry = $false;
     } catch { 
-        
+        #WRite-Host $_ -f Red
     }
     return $need_Retry
 }
-
 do {
     $refresh_tokens = @()
-    $failure_tolerance = 15
+    $failure_tolerance = 100
     [bool]$sleep_action_recommended = $false
     $pst_now = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId( [DateTime]::Now , 'Pacific Standard Time' )
-
-    Write-Host 
-    Write-Host $pst_now
-    Write-Host 
+    
+    $new_Line_countdown = 8 
 
     foreach($file in [System.IO.Directory]::GetFiles($local_cache))
     {
@@ -78,70 +77,60 @@ do {
         $sleep_wait_time = ($sleep_locked_until - $pst_now).TotalMinutes
         $active_lock_wait_time = ($lock_in_progress_to - $pst_now).TotalMinutes
 
-        # Check to see if we have to do anything.
-    #    WRite-Host "Now (PST): $pst_now" -f Blue
-    #    WRite-Host "active lock: $lock_in_progress_to ($active_lock_wait_time minutes from now)"
-    #    Write-Host "Counts > Pet: $pet_count Feed: $feed_count Sleep: $sleep_count " -f Blue
-    #    Write-Host "Pet action locked until: $pet_locked_until ($pet_wait_time minutes from now) " -f Magenta
-    #    Write-Host "Feed action locked until: $feed_locked_until ($feed_wait_time minutes from now) " -f Green
-    #    Write-Host "Sleep action locked until: $sleep_locked_until ($sleep_wait_time minutes from now) " -f DarkYellow
+        if ($verbose_logging) {
+            # Check to see if we have to do anything.
+            Write-Host $tokenId -f Cyan
+            Write-Host "Now (PST): $pst_now" -f Cyan
+            Write-Host "active lock: $lock_in_progress_to ($active_lock_wait_time minutes from now)"
+            Write-Host "Counts > Pet: $pet_count Feed: $feed_count Sleep: $sleep_count " -f white
+            Write-Host "Pet action locked until: $pet_locked_until ($pet_wait_time minutes from now) " -f Magenta
+            Write-Host "Feed action locked until: $feed_locked_until ($feed_wait_time minutes from now) " -f Green
+            Write-Host "Sleep action locked until: $sleep_locked_until ($sleep_wait_time minutes from now) " -f DarkYellow
+        }
 
         [string]$next_action = "~"
+        [int]$wait_time = 9999
 
         if  ($active_lock_wait_time -gt 0) {
             $next_action = "pause"
-        } else {
-            if ($pet_count -lt 5 -and $pet_wait_time -lt 0 -and $active_lock_wait_time -lt 0) {
-                $next_action = "Pet"
+            $wait_time = $active_lock_wait_time
+        } else {    
+            if (($pet_count -lt 5 -or $pet_wait_time -lt -360) -and $pet_wait_time -lt 0) {
+                $next_action = "pet"
             } else {
-                if ($feed_count -lt 3 -and $feed_wait_time -lt 0 -and $active_lock_wait_time -lt 0) {
-                    $next_action = "Feed"
+                if ($feed_count -lt 3 -and $feed_wait_time -lt 0) {
+                    $next_action = "feed"
                 } else {
                     if ($feed_count -eq 3 -and $pet_count -eq 5 -and $sleep_wait_time -lt 0 -and $active_lock_wait_time -lt 0) {
-                        $next_action = "Sleep"
+                        $next_action = "sleep"
                         $sleep_action_recommended = $true
                     }
                 }
             }
-        
         }
-
-
         
-        Write-Host "$tokenId.$next_action " -NoNewline
-        switch($next_action) {
-            "Pet" {
-                [bool]$need_retry = Run-SluggaAction -action "pet" -id $tokenId
-                if ($need_retry) {
-                    $failure_tolerance--
-                }
-                break;
-            }
-            "Feed" {
-                [bool]$need_retry = Run-SluggaAction -action "feed" -id $tokenId
-                if ($need_retry) {
-                    $failure_tolerance--
-                }
-                break;
-            }
-            "Sleep" {
-                [bool]$need_retry = Run-SluggaAction -action "sleep" -id $tokenId
-                if ($need_retry) {
-                    $failure_tolerance--
-                }
-                break;
-            }       
+        if ($wait_time -ne 9999) {
+            Write-Host "$tokenId.$next_action.$wait_time.m " -NoNewline
+        } else {
+            Write-Host "$tokenId.$next_action " -NoNewline
+        }        
+        
+        if ($next_action -ne "pause" -and $next_action -ne "~") {
+            [bool]$need_retry = Run-SluggaAction -action $next_action -id $tokenId
+            if ($need_retry) {
+                $failure_tolerance--
+            } 
+            $res = Run-SluggaRefreshState -id $tokenId
         }
         if ($failure_tolerance -le 0) { return }
+        $new_Line_countdown--
+        if ($new_Line_countdown -eq 0) {   
+            Write-Host 
+            $new_Line_countdown = 8
+        }
     }
     Write-Host
-    # sleep for 5 minutes, or 300 seconds.
-    if ($sleep_action_recommended -eq $true) {
-        $sleepLaps = $sleepLaps + 1
-    }
-    if ($sleepLaps -gt 2) {
-        return # blow it up if we have called sleep twice. !
-    }
-    Start-Sleep -Seconds 300
+    Write-Host "Lap complete... pause for 10 minutes..."
+    Start-Sleep -Seconds 600
 }
 while (1 -eq 1)
