@@ -1,6 +1,6 @@
 # Depends on data downloaded with the RefreshLocalCache.ps1 recipe.
 # This process will consider the local cache of data and determine the correct action for each slugga.
-# Slugga MatrixMinder v1.5
+# Slugga MatrixMinder v1.6
 $wallet = "[Your Wallet Here]"
 $local_cache = "C:\temp\_slugga\"
 $baseurl = "https://pastelworld.io/slugga-api/api/v1"
@@ -30,17 +30,22 @@ Function Run-SluggaAction {
         $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -OutVariable $resp
         $need_Retry = $false;
     } catch { 
-        #WRite-Host $_ -f Red
+        #Write-Host $_ -f Red
     }
     return $need_Retry
 }
+
 do {
     $refresh_tokens = @()
     $failure_tolerance = 100
     [bool]$sleep_action_recommended = $false
     $pst_now = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId( [DateTime]::Now , 'Pacific Standard Time' )
+
+    Write-Host 
+    Write-Host $pst_now
+    Write-Host
     
-    $new_Line_countdown = 8 
+    $new_Line_countdown = 6
 
     foreach($file in [System.IO.Directory]::GetFiles($local_cache))
     {
@@ -94,7 +99,9 @@ do {
         if  ($active_lock_wait_time -gt 0) {
             $next_action = "pause"
             $wait_time = $active_lock_wait_time
+
         } else {    
+            
             if (($pet_count -lt 5 -or $pet_wait_time -lt -360) -and $pet_wait_time -lt 0) {
                 $next_action = "pet"
             } else {
@@ -108,11 +115,11 @@ do {
                 }
             }
         }
-        
+
         if ($wait_time -ne 9999) {
-            Write-Host "$tokenId.$next_action.$wait_time.m " -NoNewline
+            Write-Host "[$tokenId.wait.$wait_time.m] " -NoNewline
         } else {
-            Write-Host "$tokenId.$next_action " -NoNewline
+            Write-Host "[$tokenId.$next_action] " -NoNewline
         }        
         
         if ($next_action -ne "pause" -and $next_action -ne "~") {
@@ -122,15 +129,19 @@ do {
             } 
             $res = Run-SluggaRefreshState -id $tokenId
         }
+
         if ($failure_tolerance -le 0) { return }
+
         $new_Line_countdown--
-        if ($new_Line_countdown -eq 0) {   
+        if ($new_Line_countdown -eq 0) {
+            
             Write-Host 
-            $new_Line_countdown = 8
+
+            $new_Line_countdown = 6
         }
     }
-    Write-Host
-    Write-Host "Lap complete... pause for 10 minutes..."
-    Start-Sleep -Seconds 600
+    Write-Host 
+    Write-Host "Lap complete... pause for 5 minutes..."
+    Start-Sleep -Seconds 300
 }
 while (1 -eq 1)
