@@ -1,6 +1,6 @@
 # Depends on data downloaded with the RefreshLocalCache.ps1 recipe.
 # This process will consider the local cache of data and determine the correct action for each slugga.
-# Slugga MatrixMinder v1.6
+# Slugga MatrixMinder v1.61
 $wallet = "[Your Wallet Here]"
 $local_cache = "C:\temp\_slugga\"
 $baseurl = "https://pastelworld.io/slugga-api/api/v1"
@@ -47,17 +47,16 @@ do {
     
     $new_Line_countdown = 6
 
-    foreach($file in [System.IO.Directory]::GetFiles($local_cache))
-    {
+    foreach($file in [System.IO.Directory]::GetFiles($local_cache)) {
         $json = [System.IO.File]::ReadAllText($file)
         $slugdata = ConvertFrom-Json -InputObject $json 
         $tokenId = $slugdata.message.slug.token_id
         $lock_in_progress_to = [System.DateTime]::Parse($slugdata.message.slug.lock_in_progress_to)
         # Write-Host "Processing Slugga $tokenId" -f Yellow
         
-        $sleep_locked_until = $pst_now.AddDays(1)
-        $feed_locked_until = $pst_now.AddDays(1)
-        $pet_locked_until = $pst_now.AddDays(1)
+        $sleep_locked_until = $pst_now.AddDays(-1)
+        $feed_locked_until = $pst_now.AddDays(-1)
+        $pet_locked_until = $pst_now.AddDays(-1)
         
         $feed_count = 0
         $pet_count = 0
