@@ -1,12 +1,34 @@
 # Depends on data downloaded with the RefreshLocalCache.ps1 recipe.
 # This process will consider the local cache of data and determine the correct action for each slugga.
-# Slugga MatrixMinder v1.61
+# Slugga MatrixMinder v1.77
+$apikey = "[Your API Key, borrow from Dev Tools in Browser SpaceDex]"
 $wallet = "[Your Wallet Here]"
 $local_cache = "C:\temp\_slugga\"
 $baseurl = "https://pastelworld.io/slugga-api/api/v1"
 
 $verbose_logging = $false
+
 $sleepLaps = 0
+
+Function Run-ServiceCall {
+    param([string]$url, [string]$tokenid, [string]$outPath = "")
+
+    #WRite-Host $url -f Yellow
+
+    # The team has added some security to the API.  Let's see if we can hack it! 
+    $headers = @{ 
+        "x-wallet"= $wallet; 
+        "x-key"= $apikey;
+        "referer"="https://pastelworld.io/spacedex/screen/slugga?sId=$tokenid"
+    }
+
+    if ($outPath -ne "") {
+        $rr = Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $outPath -Headers $headers -ErrorAction Continue 
+    } else {
+        $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -Headers $headers -ErrorAction Continue
+        return $resp.Content
+    }
+}
 
 Function Run-SluggaRefreshState {
     param([string]$id)
@@ -14,7 +36,7 @@ Function Run-SluggaRefreshState {
     $outPath = "$($local_cache)$($id).json"
     $need_Retry = $true;    
     try {
-        $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $outPath -ErrorAction Continue
+        $resp = Run-ServiceCall -url $url -tokenid $id -outPath $outPath
         $need_Retry = $false;
     } catch { 
         #Write-Host "Refresh Failed!" -f Red
@@ -27,7 +49,7 @@ Function Run-SluggaAction {
     #WRite-Host $url
     $need_Retry = $true;    
     try {
-        $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -OutVariable $resp
+        $resp = Run-ServiceCall -url $url -tokenid $id
         $need_Retry = $false;
     } catch { 
         #Write-Host $_ -f Red
@@ -43,15 +65,20 @@ do {
 
     Write-Host 
     Write-Host $pst_now
-    Write-Host
     
     $new_Line_countdown = 6
 
-    foreach($file in [System.IO.Directory]::GetFiles($local_cache)) {
+    foreach($file in [System.IO.Directory]::GetFiles($local_cache))
+    {
         $json = [System.IO.File]::ReadAllText($file)
         $slugdata = ConvertFrom-Json -InputObject $json 
         $tokenId = $slugdata.message.slug.token_id
-        $lock_in_progress_to = [System.DateTime]::Parse($slugdata.message.slug.lock_in_progress_to)
+        $lock_in_progress_to = [DateTime]::MinValue
+        
+        if ([string]::IsNullOrWhiteSpace($slugdata.message.slug.lock_in_progress_to) -eq $false) {
+            $lock_in_progress_to = [System.DateTime]::Parse($slugdata.message.slug.lock_in_progress_to)
+        }
+        
         # Write-Host "Processing Slugga $tokenId" -f Yellow
         
         $sleep_locked_until = $pst_now.AddDays(-1)
@@ -86,7 +113,7 @@ do {
             Write-Host $tokenId -f Cyan
             Write-Host "Now (PST): $pst_now" -f Cyan
             Write-Host "active lock: $lock_in_progress_to ($active_lock_wait_time minutes from now)"
-            Write-Host "Counts > Pet: $pet_count Feed: $feed_count Sleep: $sleep_count " -f white
+            Write-Host "Counts > Pet: $pet_count Feed: $feed_count Sleep: $sleep_count " -f white    
             Write-Host "Pet action locked until: $pet_locked_until ($pet_wait_time minutes from now) " -f Magenta
             Write-Host "Feed action locked until: $feed_locked_until ($feed_wait_time minutes from now) " -f Green
             Write-Host "Sleep action locked until: $sleep_locked_until ($sleep_wait_time minutes from now) " -f DarkYellow
@@ -94,6 +121,7 @@ do {
 
         [string]$next_action = "~"
         [int]$wait_time = 9999
+        
 
         if  ($active_lock_wait_time -gt 0) {
             $next_action = "pause"
@@ -104,7 +132,7 @@ do {
             if (($pet_count -lt 5 -or $pet_wait_time -lt -360) -and $pet_wait_time -lt 0) {
                 $next_action = "pet"
             } else {
-                if ($feed_count -lt 3 -and $feed_wait_time -lt 0) {
+                if (($feed_count -lt 3 -or $feed_wait_time -lt -360) -and $feed_wait_time -lt 0) {
                     $next_action = "feed"
                 } else {
                     if ($feed_count -eq 3 -and $pet_count -eq 5 -and $sleep_wait_time -lt 0 -and $active_lock_wait_time -lt 0) {
@@ -115,6 +143,20 @@ do {
             }
         }
 
+        ## HACKEROOSKI ## $next_action = "sleep"
+
+        if ($next_action -eq "~" -and ($feed_count -lt 3 -or $pet_count -lt 5)) {
+            $wait_time = $pet_wait_time
+            if ($feed_wait_time -lt $pet_wait_time) {
+                $wait_time = $feed_wait_time
+            }
+        }
+
+        if ($null -ne $slugdata.message.slug.prophet_id) {
+            WRite-Host "($($slugdata.message.slug.prophet_id))" -ForegroundColor Yellow  -NoNewline
+        }
+        
+        
         if ($wait_time -ne 9999) {
             Write-Host "[$tokenId.wait.$wait_time.m] " -NoNewline
         } else {
@@ -123,10 +165,12 @@ do {
         
         if ($next_action -ne "pause" -and $next_action -ne "~") {
             [bool]$need_retry = Run-SluggaAction -action $next_action -id $tokenId
+            Start-Sleep -Milliseconds 500
             if ($need_retry) {
                 $failure_tolerance--
             } 
             $res = Run-SluggaRefreshState -id $tokenId
+            Start-Sleep -Milliseconds 500
         }
 
         if ($failure_tolerance -le 0) { return }
@@ -139,8 +183,9 @@ do {
             $new_Line_countdown = 6
         }
     }
-    Write-Host 
-    Write-Host "Lap complete... pause for 5 minutes..."
-    Start-Sleep -Seconds 300
+    
+    Write-Host "Lap complete... " -f Cyan
+    Write-Host "pause for 7 minutes..."
+    Start-Sleep -Seconds 420
 }
 while (1 -eq 1)
